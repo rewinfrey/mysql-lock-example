@@ -41,19 +41,28 @@ func main() {
 		}
 		defer db.Close()
 
-		fmt.Println("Go func 1: Acquiring lock")
+		fmt.Println("Go func 1: Opening transaction")
+		tx, err := db.DB().BeginTx(context.Background(), nil)
+		if err != nil {
+			panic(err)
+		}
 
-		lockName := "lock_for_user_" + strconv.FormatInt(id, 10)
+		fmt.Println("Go func 1: Locking row")
 
-		acquireResult, acquireErr := db.DB().ExecContext(context.Background(), "SELECT GET_LOCK('"+lockName+"', 10)")
+		acquireResult, acquireErr := tx.ExecContext(context.Background(), "SELECT * FROM users WHERE id = ? FOR UPDATE", id)
 		if acquireErr != nil {
 			panic(acquireErr)
 		}
 		fmt.Println(acquireResult)
 
 		fmt.Println("Go func 1: Lock acquired")
+		fmt.Println("Go func 1: Sleeping with lock")
 
-		updateResult, updateErr := db.DB().ExecContext(context.Background(), "UPDATE users SET namey = ? WHERE id = ?", "GoFunc1Name", id)
+		time.Sleep(10 * time.Second)
+
+		fmt.Println("Go func 1: Issuing update")
+
+		updateResult, updateErr := tx.ExecContext(context.Background(), "UPDATE users SET namey = ? WHERE id = ?", "GoFunc1Name", id)
 		if updateErr != nil {
 			panic(updateErr)
 		}
@@ -61,20 +70,15 @@ func main() {
 
 		fmt.Println("Go func 1: Update issued")
 
-		fmt.Println("Go func 1: Awake, releasing lock")
-
-		releaseResult, releaseErr := db.DB().ExecContext(context.Background(), "SELECT RELEASE_LOCK('"+lockName+"')")
-		if releaseErr != nil {
-			panic(releaseErr)
+		fmt.Println("Go func 1: Committing transaction")
+		if err := tx.Commit(); err != nil {
+			panic(err)
 		}
-		fmt.Println(releaseResult)
-
-		fmt.Println("Go func 1: Lock released")
 
 		return
 	}(id)
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	wg.Add(1)
 	go func(id int64) {
@@ -89,11 +93,16 @@ func main() {
 		}
 		defer db.Close()
 
-		fmt.Println("Go func 2: Acquiring lock")
+		fmt.Println("Go func 2: Opening transaction")
 
-		lockName := "lock_for_user_" + strconv.FormatInt(id, 10)
+		tx, err := db.DB().BeginTx(context.Background(), nil)
+		if err != nil {
+			panic(err)
+		}
 
-		acquireResult, acquireErr := db.DB().ExecContext(context.Background(), "SELECT GET_LOCK('"+lockName+"', 10)")
+		fmt.Println("Go func 2: Locking row")
+
+		acquireResult, acquireErr := tx.ExecContext(context.Background(), "SELECT * FROM users WHERE id = ? FOR UPDATE", id)
 		if acquireErr != nil {
 			panic(acquireErr)
 		}
@@ -101,7 +110,9 @@ func main() {
 
 		fmt.Println("Go func 2: Lock acquired")
 
-		updateResult, updateErr := db.DB().ExecContext(context.Background(), "UPDATE users SET namey = ? WHERE id = ?", "GoFunc2Name", id)
+		fmt.Println("Go func 2: Issuing update")
+
+		updateResult, updateErr := tx.ExecContext(context.Background(), "UPDATE users SET namey = ? WHERE id = ?", "GoFunc2Name", id)
 		if updateErr != nil {
 			panic(updateErr)
 		}
@@ -109,13 +120,10 @@ func main() {
 
 		fmt.Println("Go func 2: Update issued")
 
-		releaseResult, releaseErr := db.DB().ExecContext(context.Background(), "SELECT RELEASE_LOCK('"+lockName+"')")
-		if releaseErr != nil {
-			panic(releaseErr)
+		fmt.Println("Go func 2: Committing transaction")
+		if err := tx.Commit(); err != nil {
+			panic(err)
 		}
-		fmt.Println(releaseResult)
-
-		fmt.Println("Go func 2: Lock released")
 
 		return
 	}(id)
