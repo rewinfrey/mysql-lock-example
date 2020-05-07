@@ -11,6 +11,74 @@ import (
 	config "github.com/rewinfrey/go-example/config"
 )
 
+const (
+	defaultDelay    = 3 * time.Second
+	pauseDelay      = 1 * time.Second
+	timeoutDuration = 1 * time.Second
+	noDelay         = 0 * time.Second
+)
+
+func log(name string, msg string) {
+	fmt.Println(name + ": " + msg)
+}
+
+func newGoRoutine(name string, id int64, delay time.Duration, wg *sync.WaitGroup) {
+	go func(name string, id int64, wg *sync.WaitGroup) {
+		defer wg.Done()
+
+		log(name, "connecting to db")
+		db, err := config.OpenDB()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defer db.Close()
+
+		log(name, "opening transaction")
+		tx, err := db.DB().BeginTx(context.Background(), nil)
+		if err != nil {
+			panic(err)
+		}
+
+		hasLock := make(chan bool)
+
+		go func(hasLock chan bool, id int64) {
+			log(name, "acquiring row lock")
+
+			_, acquireErr := tx.ExecContext(context.Background(), "SELECT * FROM users WHERE id = ? FOR UPDATE", id)
+			if acquireErr != nil {
+				panic(acquireErr)
+			}
+
+			hasLock <- true
+		}(hasLock, id)
+
+		log(name, "waiting for lock")
+		select {
+		case <-hasLock:
+			log(name, "has lock")
+		case <-time.After(timeoutDuration):
+			log(name, "lock timed out")
+			return
+		}
+
+		log(name, "updating row")
+		_, updateErr := tx.ExecContext(context.Background(), "UPDATE users SET namey = ? WHERE id = ?", "GoFunc1Name", id)
+		if updateErr != nil {
+			panic(updateErr)
+		}
+
+		time.Sleep(delay)
+
+		log(name, "committing transaction")
+		if err := tx.Commit(); err != nil {
+			panic(err)
+		}
+
+		return
+	}(name, id, wg)
+}
+
 func main() {
 	db, err := config.OpenDB()
 	if err != nil {
@@ -29,106 +97,19 @@ func main() {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func(id int64) {
-		defer wg.Done()
+	newGoRoutine("1", id, defaultDelay, &wg)
 
-		fmt.Println("Go func 1")
-
-		db, err := config.OpenDB()
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		defer db.Close()
-
-		fmt.Println("Go func 1: Opening transaction")
-		tx, err := db.DB().BeginTx(context.Background(), nil)
-		if err != nil {
-			panic(err)
-		}
-
-		fmt.Println("Go func 1: Locking row")
-
-		acquireResult, acquireErr := tx.ExecContext(context.Background(), "SELECT * FROM users WHERE id = ? FOR UPDATE", id)
-		if acquireErr != nil {
-			panic(acquireErr)
-		}
-		fmt.Println(acquireResult)
-
-		fmt.Println("Go func 1: Lock acquired")
-		fmt.Println("Go func 1: Sleeping with lock")
-
-		time.Sleep(10 * time.Second)
-
-		fmt.Println("Go func 1: Issuing update")
-
-		updateResult, updateErr := tx.ExecContext(context.Background(), "UPDATE users SET namey = ? WHERE id = ?", "GoFunc1Name", id)
-		if updateErr != nil {
-			panic(updateErr)
-		}
-		fmt.Println(updateResult)
-
-		fmt.Println("Go func 1: Update issued")
-
-		fmt.Println("Go func 1: Committing transaction")
-		if err := tx.Commit(); err != nil {
-			panic(err)
-		}
-
-		return
-	}(id)
-
-	time.Sleep(2 * time.Second)
+	time.Sleep(pauseDelay)
 
 	wg.Add(1)
-	go func(id int64) {
-		defer wg.Done()
+	newGoRoutine("2", id, defaultDelay, &wg)
 
-		fmt.Println("Go func 2")
+	time.Sleep(pauseDelay)
 
-		db, err := config.OpenDB()
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		defer db.Close()
+	wg.Add(1)
 
-		fmt.Println("Go func 2: Opening transaction")
-
-		tx, err := db.DB().BeginTx(context.Background(), nil)
-		if err != nil {
-			panic(err)
-		}
-
-		fmt.Println("Go func 2: Locking row")
-
-		acquireResult, acquireErr := tx.ExecContext(context.Background(), "SELECT * FROM users WHERE id = ? FOR UPDATE", id)
-		if acquireErr != nil {
-			panic(acquireErr)
-		}
-		fmt.Println(acquireResult)
-
-		fmt.Println("Go func 2: Lock acquired")
-
-		fmt.Println("Go func 2: Issuing update")
-
-		updateResult, updateErr := tx.ExecContext(context.Background(), "UPDATE users SET namey = ? WHERE id = ?", "GoFunc2Name", id)
-		if updateErr != nil {
-			panic(updateErr)
-		}
-		fmt.Println(updateResult)
-
-		fmt.Println("Go func 2: Update issued")
-
-		fmt.Println("Go func 2: Committing transaction")
-		if err := tx.Commit(); err != nil {
-			panic(err)
-		}
-
-		return
-	}(id)
+	newGoRoutine("3", id, noDelay, &wg)
 
 	wg.Wait()
-
 	return
 }
