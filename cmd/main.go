@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"sync"
@@ -83,6 +84,21 @@ func main() {
 	}
 	defer db.Close()
 
+	tx, beginTxErr := db.DB().BeginTx(context.Background(), nil)
+	if beginTxErr != nil {
+		panic(beginTxErr)
+	}
+	defer func() {
+		if err := tx.Commit(); err != nil {
+			if err == sql.ErrTxDone {
+				fmt.Println("already commited")
+			} else {
+				fmt.Println(err)
+				panic(err)
+			}
+		}
+	}()
+
 	result, err4 := db.DB().ExecContext(context.Background(), "INSERT INTO users (name, namey, age) VALUES (?,?,?)", "KingJames", "JamesKing", 37)
 	if err4 != nil {
 		panic(err4)
@@ -106,5 +122,12 @@ func main() {
 	newGoRoutine("3", id, noDelay, &wg)
 
 	wg.Wait()
+
+	log("main", "rolling back tx")
+	rollbackErr := tx.Rollback()
+	if rollbackErr != nil {
+		panic(rollbackErr)
+	}
+
 	return
 }
