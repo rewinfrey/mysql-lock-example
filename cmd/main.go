@@ -25,11 +25,12 @@ func log(id int, context string, val interface{}) {
 
 func newGoRoutine(id int, db *gorm.DB, wg *sync.WaitGroup) {
 	go func() {
+		ctx := context.Background()
 		defer wg.Done()
 
-		txOptions := sql.TxOptions{Isolation: 0, ReadOnly: false}
+		txOptions := sql.TxOptions{Isolation: 2, ReadOnly: false}
 
-		tx, err := db.DB().BeginTx(context.Background(), &txOptions)
+		tx, err := db.DB().BeginTx(ctx, &txOptions)
 		if err != nil {
 			log(id, "BeginTx", err)
 			return
@@ -38,7 +39,7 @@ func newGoRoutine(id int, db *gorm.DB, wg *sync.WaitGroup) {
 		hasLock := make(chan bool)
 
 		go func(hasLock chan bool) {
-			ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
+			ctx, cancel := context.WithTimeout(ctx, timeoutDuration)
 			defer cancel()
 
 			_, acquireErr := tx.ExecContext(ctx, "INSERT INTO example (id) VALUES(1)")
@@ -57,6 +58,12 @@ func newGoRoutine(id int, db *gorm.DB, wg *sync.WaitGroup) {
 				log(id, "<-hasLock", "has lock")
 
 				time.Sleep(delay)
+
+				_, err = tx.ExecContext(ctx, "DELETE FROM example WHERE id = 1")
+				if err != nil {
+					log(id, "Delete", err)
+					return
+				}
 
 				err = tx.Rollback()
 				if err != nil {
