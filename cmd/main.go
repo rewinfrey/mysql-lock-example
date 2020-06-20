@@ -16,7 +16,7 @@ const (
 	delay           = 2 * time.Second
 	timeoutDuration = 1 * time.Second
 	noDelay         = 0 * time.Second
-	numWorkers      = 5
+	numWorkers      = 2
 )
 
 func log(id int, context string, val interface{}) {
@@ -66,8 +66,13 @@ func newGoRoutine(id int, db *gorm.DB, wg *sync.WaitGroup) {
 				return
 			}
 
+			err = tx.Rollback()
+			if err != nil {
+				log(id, "Rollback", err)
+			}
+
 			wg.Add(1)
-			newGoRoutine(id*100, db, wg)
+			newGoRoutine(id*10, db, wg)
 		}
 
 		return
@@ -87,7 +92,7 @@ func main() {
 	fmt.Println("kicking off go routines")
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		newGoRoutine(i, db, &wg)
+		newGoRoutine(i+1, db, &wg)
 	}
 
 	wg.Wait()
